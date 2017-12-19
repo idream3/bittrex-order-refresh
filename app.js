@@ -10,12 +10,14 @@ var config = require('./lib/config'),
     util = require('util'),
     moment = require('moment'),
     jsonfile = require('jsonfile'),
-    async = require('async')
+    async = require('async'),
+    prompt = require('prompt')
 
 // Command line args for special recovery mode functions; not needed in normal operation
 program
     .option('--purge-open-orders', 'Cancel ALL open limit orders, and exit (CAUTION)')
     .option('--restore-orders <file>', 'Restore limit orders from the specified backup file, and exit')
+    .option('--double-orders', 'Set a number of double orders')
     .parse(process.argv)
 
 bittrex.options({
@@ -79,6 +81,122 @@ var doCreateOrder = function(newOrderType, newOrder, cb) {
         cb(data.result.uuid)
     }
     setTimeout(createOrder, 0)
+}
+
+
+// https://github.com/flatiron/prompt
+if (program.doubleOrders) {
+    var schema = {
+        properties: {
+            base: {
+                type: 'string',
+                message: 'Must be a string',
+                required: true,
+                description: 'Base market symbol',
+                default: 'BTC'
+            },
+            market: {
+                type: 'string',
+                message: 'Must be a string',
+                required: true,
+                description: 'Symbol pair'
+            },
+            buyPrice: {
+                type: 'number',
+                message: 'Price must be a number',
+                required: true,
+                description: 'Buy price (rate)'
+            },
+            buyQuantity: {
+                type: 'number',
+                required: true,
+                description: 'Quantity (units)'
+            },
+            orderCount: {
+                type: 'number',
+                message: 'Amount must be a number',
+                required: true,
+                description: 'Amount of double orders to create',
+                default: 2
+            }
+        }
+    };
+
+    prompt.start();
+    prompt.get(schema, function (err, result) {
+        console.log(
+            'Creating ' + result.orderCount +
+            ' double orders with start price: ' + result.buyPrice +
+            ' and amount: ' + result.buyQuantity
+        );
+
+        var confirmSchema = {
+            properties: {
+                ok: {
+                    type: 'string',
+                    required: true,
+                    description: 'Proceed',
+                    default: 'Y/N'
+                }
+            }
+        }
+
+        prompt.get(confirmSchema, function (err, res) {
+            if (String(res.ok).toUpperCase() !== 'Y') {
+                return;
+            }
+            var orderType = 'LIMIT_SELL',
+                market = result.base.toUpperCase() + '-' + result.market.toUpperCase(),
+                remainingQuantity = result.buyQuantity,
+                price = result.buyPrice,
+                targetBuffer = 0.00000010,
+                range = _.range(result.orderCount)
+
+            async.mapLimit(range, 2, function (o, cb, x) {
+                console.log(o);
+
+                remainingQuantity = remainingQuantity / 2
+                price = price * 2
+
+                var order = {
+                    market: market,
+                    quantity: remainingQuantity, // amount of coin to buy / sell
+                    rate: price, // price to place order at
+
+                    IsConditional: true,
+                    Condition: 'GREATER_THAN',
+                    ConditionTarget: (price - targetBuffer).toFixed(8)
+                }
+
+                console.log(order);
+
+                // {
+                    // "Exchange": "BTC-CPC",
+                    // "OrderType": "LIMIT_SELL",
+                    // "Quantity": 12.21428572,
+                    // "QuantityRemaining": 12.21428572,
+                    // "Limit": 0.00012248,
+                    // "CommissionPaid": 0,
+                    // "Price": 0,
+                    // "PricePerUnit": null,
+                    // "Opened": "2017-11-01T04:28:26.973",
+                    // "Closed": null,
+                    // "CancelInitiated": false,
+                    // "ImmediateOrCancel": false,
+                    // "IsConditional": true,
+                    // "Condition": "GREATER_THAN",
+                    // "ConditionTarget": 0.0001224
+                // },
+
+                doCreateOrder(orderType, order, function(newUuid) {
+                    logger.debug('Order %s created.', newUuid)
+                    cb()
+                })
+            })
+        })
+
+    });
+    return;
 }
 
 bittrex.getopenorders({}, function(err, data) {
@@ -178,3 +296,4 @@ bittrex.getopenorders({}, function(err, data) {
     })
 
 })
+

@@ -6,11 +6,13 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "doubles": "npm start -- --double-orders"
+    "doubles": "npm start -- --double-orders",
+    "gaps": "npm start -- --gap-find"
   },
   "_NOTE": "Pin *specific* dependency versions since this is a mission-critical application",
   "dependencies": {
     "commander": "2.12.1",
+    "jsonexport": "^2.0.11",
     "jsonfile": "4.0.0",
     "lodash": "4.17.4",
     "moment": "2.19.2",

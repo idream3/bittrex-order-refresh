@@ -11,13 +11,17 @@ var config = require('./lib/config'),
     moment = require('moment'),
     jsonfile = require('jsonfile'),
     async = require('async'),
-    prompt = require('prompt')
+    prompt = require('prompt'),
+    jsonexport = require('jsonexport'),
+    fs = require('fs')
+
 
 // Command line args for special recovery mode functions; not needed in normal operation
 program
     .option('--purge-open-orders', 'Cancel ALL open limit orders, and exit (CAUTION)')
     .option('--restore-orders <file>', 'Restore limit orders from the specified backup file, and exit')
     .option('--double-orders', 'Set a number of double orders')
+    .option('--gap-find', 'Find open gaps')
     .parse(process.argv)
 
 bittrex.options({
@@ -122,7 +126,7 @@ if (program.doubleOrders) {
         }
     };
 
-    prompt.start();
+    prompt.start()
     prompt.get(schema, function (err, result) {
         console.log(
             'Creating ' + result.orderCount +
@@ -196,6 +200,165 @@ if (program.doubleOrders) {
         })
 
     });
+    return;
+}
+
+
+var doFindGaps = function(data) {
+    var gapThreshold = 0.00000001
+    var gaps = [];
+    var prevCandle;
+
+    var lastCandle = data[data.length-1];
+    data.map(function(candle) {
+        if (prevCandle) {
+            var prevCandleDirection = Math.sign(prevCandle.O - prevCandle.C)
+            var prevClose = prevCandle.C
+            var open = candle.O
+            var difference = (open - prevClose).toFixed(8)
+            var hasGap = false
+
+            if (prevCandleDirection === -1 && open > prevClose) {
+                // down
+                hasGap = true
+            }
+
+            if (prevCandleDirection === 1 && open < prevClose) {
+                // up
+                hasGap = true
+            }
+
+            // console.log(prevCandleDirection, hasGap)
+
+            // is there a price difference between close and open
+            if (hasGap && Math.abs(difference) > gapThreshold) {
+                // console.log('Gap at', candle.T)
+                // save gap info
+                gaps.push({
+                    date: candle.T,
+                    size: Math.abs(difference).toFixed(8),
+                    direction: Math.sign(difference) === -1 ? 'down' : 'up',
+                    aboveCurrentPrice: candle.O > lastCandle.C,
+                    candle: candle,
+                    prevCandle: prevCandle
+                })
+            }
+
+            // scan gap list for filled in gaps
+            var gapsToRemove = []
+            gaps.map(function(gap, idx) {
+                if (gap.direction === 'down') {
+                    // if gap direction is down we need to check if price
+                    // has closed to the start of the top of the gap
+                    if (candle.C > gap.prevCandle.C) {
+                        // gap filled
+                        gapsToRemove.push(idx)
+                    }
+                }
+                if (gap.direction === 'up') {
+                    // if gap direction is up we need to check if price
+                    // has closed to the start of the top of the gap
+                    if (candle.C < gap.prevCandle.C) {
+                        // gap filled
+                        gapsToRemove.push(idx)
+                    }
+                }
+            })
+
+            // purge filled gaps
+            gapsToRemove.map(function(idx) {
+                gaps.splice( idx, 1 )
+            })
+        }
+        prevCandle = candle
+    })
+
+    // Clean up gap data
+    var cleanedGaps = gaps.map(function(gap) {
+        return {
+            'Gap size': gap.size,
+            // 'Gap direction': gap.direction,
+            'Gap above latest price': gap.aboveCurrentPrice ? 'yes' : 'no',
+            'Candle before date': gap.prevCandle.T,
+            'Candle before close': gap.prevCandle.C,
+            'Candle after date': gap.candle.T,
+            'Candle after open': gap.candle.O
+        }
+    })
+
+    if (!!cleanedGaps.length) {
+        console.log(cleanedGaps)
+        console.log(cleanedGaps.length + ' gaps found that are unfilled')
+        return cleanedGaps
+    } else {
+        console.log('No gaps found')
+    }
+
+    return null
+}
+
+
+if (program.gapFind) {
+    var schema = {
+        properties: {
+            base: {
+                type: 'string',
+                message: 'Must be a string',
+                required: true,
+                description: 'Base market symbol',
+                default: 'BTC'
+            },
+            market: {
+                type: 'string',
+                message: 'Must be a string',
+                required: true,
+                description: 'Symbol pair'
+            },
+            tick: {
+                type: 'string',
+                message: 'interval must be a string',
+                required: true,
+                description: 'ticker (oneMin, fiveMin, thirtyMin, hour, day)',
+                default: 'day'
+            }
+        }
+    };
+
+    prompt.start()
+    prompt.get(schema, function (err, result) {
+        var market = result.base.toUpperCase() + '-' + result.market.toUpperCase()
+        bittrex.getcandles({
+          marketName: market,
+          tickInterval: result.tick
+        }, function(err, data) {
+          if (err) {
+            /**
+              {
+                success: false,
+                message: 'INVALID_TICK_INTERVAL',
+                result: null
+              }
+            */
+            return console.error(err)
+          }
+
+          var gaps = doFindGaps(data.result)
+
+          jsonexport(gaps, {}, function(err, csv){
+                if(err) return console.log(err)
+                console.log(csv)
+                fs.writeFile(market + '-' + result.tick + '-gaps.csv', csv, function(err) {
+                    if(err) {
+                        return console.log(err);
+                    }
+
+                    console.log('The file was saved!');
+                });
+          })
+
+        });
+    });
+
     return;
 }
 
@@ -294,6 +457,5 @@ bittrex.getopenorders({}, function(err, data) {
             } // else, skip it this run
         })
     })
-
 })
 

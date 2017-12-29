@@ -297,7 +297,7 @@ var doFindGaps = function(data) {
     return null
 }
 
-
+// https://bioequity.org/2013/11/13/statistics-do-stock-price-gaps-always-get-filled/
 if (program.gapFind) {
     var schema = {
         properties: {
@@ -344,17 +344,19 @@ if (program.gapFind) {
 
           var gaps = doFindGaps(data.result)
 
-          jsonexport(gaps, {}, function(err, csv){
-                if(err) return console.log(err)
-                console.log(csv)
-                fs.writeFile(market + '-' + result.tick + '-gaps.csv', csv, function(err) {
-                    if(err) {
-                        return console.log(err);
-                    }
+          if (gaps) {
+              jsonexport(gaps, {}, function(err, csv){
+                    if(err) return console.log(err)
+                    console.log(csv)
+                    fs.writeFile(market + '-' + result.tick + '-gaps.csv', csv, function(err) {
+                        if(err) {
+                            return console.log(err);
+                        }
 
-                    console.log('The file was saved!');
-                });
-          })
+                        console.log('The file was saved!');
+                    });
+              })
+          }
 
         });
     });

@@ -22,6 +22,7 @@ program
     .option('--restore-orders <file>', 'Restore limit orders from the specified backup file, and exit')
     .option('--double-orders', 'Set a number of double orders')
     .option('--gap-find', 'Find open gaps')
+    .option('--determine-doubles', 'Determine amount of doubles from arbiturary date')
     .parse(process.argv)
 
 bittrex.options({
@@ -237,6 +238,7 @@ var doFindGaps = function(data) {
                 gaps.push({
                     date: candle.T,
                     size: Math.abs(difference).toFixed(8),
+                    difference: prevCandle.C / lastCandle.C,
                     direction: Math.sign(difference) === -1 ? 'down' : 'up',
                     aboveCurrentPrice: candle.O > lastCandle.C,
                     candle: candle,
@@ -277,8 +279,9 @@ var doFindGaps = function(data) {
     var cleanedGaps = gaps.map(function(gap) {
         return {
             'Gap size': gap.size,
+            'Difference': gap.difference.toFixed(1) + 'x',
             // 'Gap direction': gap.direction,
-            'Gap above latest price': gap.aboveCurrentPrice ? 'yes' : 'no',
+            'Gap above latest price': gap.aboveCurrentPrice ? 'Above' : 'Below',
             'Candle before date': gap.prevCandle.T,
             'Candle before close': gap.prevCandle.C,
             'Candle after date': gap.candle.T,
@@ -364,6 +367,66 @@ if (program.gapFind) {
     return;
 }
 
+/*
+if (program.determineDoubles) {
+    var schema = {
+        properties: {
+            base: {
+                type: 'string',
+                message: 'Must be a string',
+                required: true,
+                description: 'Base market symbol',
+                default: 'BTC'
+            },
+            market: {
+                type: 'string',
+                message: 'Must be a string',
+                required: true,
+                description: 'Symbol pair'
+            },
+            tick: {
+                type: 'string',
+                message: 'interval must be a string',
+                required: true,
+                description: 'ticker (oneMin, fiveMin, thirtyMin, hour, day)',
+                default: 'day'
+            }
+        }
+    };
+
+    prompt.start()
+    prompt.get(schema, function (err, result) {
+        var market = result.base.toUpperCase() + '-' + result.market.toUpperCase()
+        bittrex.getcandles({
+          marketName: market,
+          tickInterval: result.tick
+        }, function(err, data) {
+          if (err) {
+            return console.error(err)
+          }
+
+          var gaps = doFindGaps(data.result)
+
+          if (gaps) {
+              jsonexport(gaps, {}, function(err, csv){
+                    if(err) return console.log(err)
+                    console.log(csv)
+                    fs.writeFile(market + '-' + result.tick + '-gaps.csv', csv, function(err) {
+                        if(err) {
+                            return console.log(err);
+                        }
+
+                        console.log('The file was saved!');
+                    });
+              })
+          }
+
+        });
+    });
+
+    return;
+}
+*/
 bittrex.getopenorders({}, function(err, data) {
     if (err || !data.success) {
         logger.error('Failed to get open orders: %s; %j', data ? data.message : '', err)
